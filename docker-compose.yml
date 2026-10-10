@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: telegram_bot
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      # Exemplo de configuração de banco de dados caso passe a usar diretamente o Postgres local
+      # ao invés do Supabase em produção/desenvolvimento
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/bot_db
+    restart: unless-stopped
+    volumes:
+      - .:/app
+
+  db:
+    image: postgres:15
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: bot_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # O script schema.sql será executado automaticamente na primeira vez que o banco iniciar
+      - ./schema.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
