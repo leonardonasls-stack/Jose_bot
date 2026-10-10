@@ -26,7 +26,7 @@ O sistema é focado em 4 módulos principais, acessados através de um menu inte
 
 * **Linguagem:** Python 3.11+
 * **Framework do Bot:** `python-telegram-bot` (Assíncrono, gerenciamento de menus e máquinas de estado).
-* **Banco de Dados:** PostgreSQL (via **Supabase** SDK).
+* **Banco de Dados:** PostgreSQL (local ou em contêiner Docker).
 * **Ambiente:** `python-dotenv` para variáveis de ambiente.
 
 ## 📂 Estrutura do Projeto
@@ -53,14 +53,11 @@ O sistema é focado em 4 módulos principais, acessados através de um menu inte
 ## 🚀 Como Executar Localmente
 
 ### 1. Pré-requisitos
-* Python 3.11 ou superior
 * Um token de Bot do Telegram (obtido via [BotFather](https://t.me/BotFather))
-* Uma conta no [Supabase](https://supabase.com/) com um projeto criado.
+* **Opção 1:** [Docker](https://docs.docker.com/get-docker/) e Docker Compose (Recomendado)
+* **Opção 2:** Python 3.11+ e PostgreSQL local
 
-### 2. Configuração do Banco de Dados
-No painel do seu projeto no Supabase, abra o SQL Editor e execute o conteúdo do arquivo `schema.sql` para criar as tabelas necessárias (`users`, `inventory`, `installations`, `returns_to_hq`).
-
-### 3. Instalação e Execução
+### 2. Configuração Inicial
 
 1. Clone o repositório:
    ```bash
@@ -68,7 +65,38 @@ No painel do seu projeto no Supabase, abra o SQL Editor e execute o conteúdo do
    cd Jose_bot
    ```
 
-2. Crie e ative um ambiente virtual (recomendado):
+2. Configure as variáveis de ambiente:
+   * Copie o arquivo `.env.example` para `.env`
+   * Preencha seu token do Telegram e o código de acesso:
+     ```env
+     TELEGRAM_BOT_TOKEN=seu_token_aqui
+     DATABASE_URL=postgresql://postgres:postgres@db:5432/bot_db  # Mantenha assim para usar com Docker
+     ACCESS_CODE=123456
+     ```
+
+### 3. Execução com Docker (Recomendado) 🐳
+
+A forma mais simples de rodar o bot e o banco de dados é usando o Docker Compose. O script `schema.sql` será executado automaticamente na primeira inicialização do banco.
+
+```bash
+docker-compose up -d
+```
+
+Pronto! O bot já está rodando em segundo plano. Você pode verificar os logs com:
+```bash
+docker-compose logs -f bot
+```
+
+### 4. Execução Local sem Docker (Alternativa)
+
+Se preferir não usar Docker, você precisará ter um banco de dados PostgreSQL rodando localmente.
+
+1. Crie um banco de dados e execute o script `schema.sql` para criar as tabelas.
+2. Altere o `DATABASE_URL` no seu `.env` para apontar para o seu banco local:
+   ```env
+   DATABASE_URL=postgresql://seu_usuario:sua_senha@localhost:5432/nome_do_banco
+   ```
+3. Crie e ative um ambiente virtual:
    ```bash
    python -m venv venv
    # No Windows:
@@ -76,24 +104,11 @@ No painel do seu projeto no Supabase, abra o SQL Editor e execute o conteúdo do
    # No Linux/Mac:
    source venv/bin/activate
    ```
-
-3. Instale as dependências:
+4. Instale as dependências e execute:
    ```bash
    pip install -r requirements.txt
-   ```
-
-4. Configure as variáveis de ambiente:
-   * Copie o arquivo `.env.example` para `.env`
-   * Preencha as credenciais:
-     ```env
-     TELEGRAM_BOT_TOKEN=seu_token_aqui
-     SUPABASE_URL=sua_url_do_supabase
-     SUPABASE_KEY=sua_anon_key_do_supabase
-     ```
-
-5. Execute o bot:
-   ```bash
    python src/main.py
    ```
 
-6. Abra o Telegram, procure pelo seu bot e envie o comando `/start`.
+### 5. Iniciar o Uso
+Abra o Telegram, procure pelo seu bot e envie o comando `/start`. Digite o `ACCESS_CODE` configurado no seu `.env` para se autenticar.

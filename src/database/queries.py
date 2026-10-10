@@ -1,11 +1,12 @@
 import logging
-from config import supabase_client
+import json
+from config import db_conn
 
 logger = logging.getLogger(__name__)
 
 def _check_client():
-    if not supabase_client:
-        logger.error("Supabase client não está inicializado (verifique o .env).")
+    if not db_conn:
+        logger.error("Conexão com o banco de dados não está inicializada (verifique o .env).")
         return False
     return True
 
@@ -13,14 +14,18 @@ def get_or_create_user(telegram_id: int, first_name: str):
     """Verifica se o usuário existe pelo ID do Telegram. Se não, o cadastra automaticamente."""
     if not _check_client(): return None
     try:
-        response = supabase_client.table("users").select("*").eq("telegram_id", telegram_id).execute()
-        if response.data:
-            return response.data[0] # Retorna o usuário existente
-        
-        # Se vazio, cadastra
-        new_user = {"telegram_id": telegram_id, "first_name": first_name}
-        resp_insert = supabase_client.table("users").insert(new_user).execute()
-        return resp_insert.data[0]
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT * FROM users WHERE telegram_id = %s", (telegram_id,))
+            user = cur.fetchone()
+            if user:
+                return user
+            
+            # Se vazio, cadastra
+            cur.execute(
+                "INSERT INTO users (telegram_id, first_name) VALUES (%s, %s) RETURNING *",
+                (telegram_id, first_name)
+            )
+            return cur.fetchone()
     except Exception as e:
         logger.error(f"Erro ao buscar/criar usuário: {e}")
         return None
@@ -29,9 +34,11 @@ def get_user_uuid_from_telegram(telegram_id_str: str):
     """Obtém o UUID customizado da tabela users a partir do Telegram ID."""
     if not _check_client(): return None
     try:
-        response = supabase_client.table("users").select("id").eq("telegram_id", int(telegram_id_str)).execute()
-        if response.data:
-            return response.data[0]['id']
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT id FROM users WHERE telegram_id = %s", (int(telegram_id_str),))
+            row = cur.fetchone()
+            if row:
+                return row['id']
     except Exception as e:
         logger.error(f"Erro ao buscar UUID do usuário: {e}")
     return None
@@ -40,9 +47,12 @@ def create_user(telegram_id: int, first_name: str):
     """Cadastra o usuário."""
     if not _check_client(): return None
     try:
-        new_user = {"telegram_id": telegram_id, "first_name": first_name}
-        resp_insert = supabase_client.table("users").insert(new_user).execute()
-        return resp_insert.data[0]
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO users (telegram_id, first_name) VALUES (%s, %s) RETURNING *",
+                (telegram_id, first_name)
+            )
+            return cur.fetchone()
     except Exception as e:
         logger.error(f"Erro ao criar usuário: {e}")
         return None
@@ -56,13 +66,11 @@ def add_inventory(user_id: str, category: str, specs: dict, quantity: int = 1):
     uuid = get_user_uuid_from_telegram(user_id)
     if not uuid: return False
     try:
-        data = {
-            "user_id": uuid,
-            "category": category,
-            "specs": specs,
-            "quantity": quantity
-        }
-        supabase_client.table("inventory").insert(data).execute()
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO inventory (user_id, category, specs, quantity) VALUES (%s, %s, %s, %s)",
+                (uuid, category, json.dumps(specs), quantity)
+            )
         return True
     except Exception as e:
         logger.error(f"Erro ao adicionar peça: {e}")
@@ -74,8 +82,9 @@ def get_user_inventory(user_id: str):
     uuid = get_user_uuid_from_telegram(user_id)
     if not uuid: return []
     try:
-        response = supabase_client.table("inventory").select("*").eq("user_id", uuid).gt("quantity", 0).execute()
-        return response.data
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT * FROM inventory WHERE user_id = %s AND quantity > 0", (uuid,))
+            return cur.fetchall()
     except Exception as e:
         logger.error(f"Erro ao buscar estoque: {e}")
         return []
@@ -87,17 +96,18 @@ def use_inventory_item(inventory_id: str, quantity_used: int = 1):
     """Deduz uma quantidade do estoque do técnico. Se zerar, deleta o registro."""
     if not _check_client(): return False
     try:
-        # Busca a quantidade atual
-        item_resp = supabase_client.table("inventory").select("quantity").eq("id", inventory_id).execute()
-        if not item_resp.data: return False
-        
-        current_qty = item_resp.data[0]["quantity"]
-        new_qty = current_qty - quantity_used
-        
-        if new_qty <= 0:
-            supabase_client.table("inventory").delete().eq("id", inventory_id).execute()
-        else:
-            supabase_client.table("inventory").update({"quantity": new_qty}).eq("id", inventory_id).execute()
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT quantity FROM inventory WHERE id = %s", (inventory_id,))
+            item = cur.fetchone()
+            if not item: return False
+            
+            current_qty = item["quantity"]
+            new_qty = current_qty - quantity_used
+            
+            if new_qty <= 0:
+                cur.execute("DELETE FROM inventory WHERE id = %s", (inventory_id,))
+            else:
+                cur.execute("UPDATE inventory SET quantity = %s WHERE id = %s", (new_qty, inventory_id))
         return True
     except Exception as e:
         logger.error(f"Erro ao dar baixa no estoque: {e}")
@@ -109,15 +119,11 @@ def register_installation(user_id: str, client_name: str, install_date: str, cat
     uuid = get_user_uuid_from_telegram(user_id)
     if not uuid: return False
     try:
-        data = {
-            "user_id": uuid,
-            "client_name": client_name,
-            "installation_date": install_date,
-            "category_used": category_used,
-            "specs_used": specs_used,
-            "inventory_id": inventory_id
-        }
-        supabase_client.table("installations").insert(data).execute()
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO installations (user_id, client_name, installation_date, category_used, specs_used, inventory_id) VALUES (%s, %s, %s, %s, %s, %s)",
+                (uuid, client_name, install_date, category_used, json.dumps(specs_used), inventory_id)
+            )
         return True
     except Exception as e:
         logger.error(f"Erro ao registrar instalação: {e}")
@@ -129,14 +135,11 @@ def add_return_to_hq(user_id: str, client_name: str, category: str, specs: dict)
     uuid = get_user_uuid_from_telegram(user_id)
     if not uuid: return False
     try:
-        data = {
-            "user_id": uuid,
-            "client_name": client_name,
-            "category": category,
-            "specs_removed": specs,
-            "status": "PENDING_RETURN"
-        }
-        supabase_client.table("returns_to_hq").insert(data).execute()
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO returns_to_hq (user_id, client_name, category, specs_removed, status) VALUES (%s, %s, %s, %s, %s)",
+                (uuid, client_name, category, json.dumps(specs), "PENDING_RETURN")
+            )
         return True
     except Exception as e:
         logger.error(f"Erro ao recolher sucata: {e}")
@@ -151,8 +154,9 @@ def get_pending_returns(user_id: str):
     uuid = get_user_uuid_from_telegram(user_id)
     if not uuid: return []
     try:
-        response = supabase_client.table("returns_to_hq").select("*").eq("user_id", uuid).eq("status", "PENDING_RETURN").execute()
-        return response.data
+        with db_conn.cursor() as cur:
+            cur.execute("SELECT * FROM returns_to_hq WHERE user_id = %s AND status = 'PENDING_RETURN'", (uuid,))
+            return cur.fetchall()
     except Exception as e:
         logger.error(f"Erro ao buscar sucatas pendentes: {e}")
         return []
@@ -163,12 +167,11 @@ def dispatch_returns(user_id: str, dispatch_date: str):
     uuid = get_user_uuid_from_telegram(user_id)
     if not uuid: return False
     try:
-        data = {
-            "status": "DISPATCHED",
-            "dispatched_date": dispatch_date
-        }
-        # Atualiza todos os itens do técnico que estavam pendentes
-        supabase_client.table("returns_to_hq").update(data).eq("user_id", uuid).eq("status", "PENDING_RETURN").execute()
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE returns_to_hq SET status = 'DISPATCHED', dispatched_date = %s WHERE user_id = %s AND status = 'PENDING_RETURN'",
+                (dispatch_date, uuid)
+            )
         return True
     except Exception as e:
         logger.error(f"Erro ao despachar sucatas: {e}")
