@@ -17,7 +17,10 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [
             InlineKeyboardButton("📦 Meu Estoque", callback_data="menu_view_stock"),
-            InlineKeyboardButton("🚚 Devolver Matriz", callback_data="menu_rma")
+            InlineKeyboardButton("🚗 Meu Porta-Malas", callback_data="menu_view_trunk")
+        ],
+        [
+            InlineKeyboardButton("🚚 Devolver Matriz (RMA)", callback_data="menu_rma")
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -54,18 +57,53 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         else:
             text = "📦 *Meu Estoque*\n\n"
             for item in inventory:
-                cat = item['category'].capitalize()
+                cat = item['category']
                 specs = item['specs']
                 qty = item['quantity']
                 
-                if cat.lower() in ["catraca", "leitor"]:
-                    text += f"🔹 {cat} (NS: {specs.get('numero_serie', 'N/A')})\n"
+                if cat == "catraca":
+                    text += f"🔹 Catraca - Placa {specs.get('versao_placa', '')} (NS: {specs.get('numero_serie', '')} | MAC: {specs.get('mac_address', '')})\n"
+                elif cat == "leitor":
+                    text += f"🔹 Leitor {specs.get('modelo', '')} (NS: {specs.get('numero_serie', '')} | MAC: {specs.get('mac_address', '')})\n"
+                elif cat == "fonte":
+                    text += f"🔹 Fonte {specs.get('marca', '')} {specs.get('voltagem', '')} {specs.get('corrente', '')} ({qty} unid.)\n"
+                elif cat == "antena":
+                    text += f"🔹 Antena {specs.get('tipo', '')} - {specs.get('modelo', '')} ({qty} unid.)\n"
                 else:
-                    text += f"🔹 {cat} - {specs.get('marca', specs.get('modelo', ''))} ({qty} unid.)\n"
+                    text += f"🔹 {cat.capitalize()} ({qty} unid.)\n"
             
             await query.message.reply_text(text, parse_mode='Markdown')
         
         # Voltar ao menu principal depois
+        await show_main_menu(update, context)
+    elif data == "menu_view_trunk":
+        from database.queries import get_pending_returns
+        user_id = str(query.from_user.id)
+        returns = get_pending_returns(user_id)
+        
+        if not returns:
+            await query.message.reply_text("🚗 *Meu Porta-Malas*\n\nSeu porta-malas está vazio. Nenhuma sucata aguardando devolução.", parse_mode='Markdown')
+        else:
+            text = "🚗 *Meu Porta-Malas (Sucatas)*\n\n"
+            for item in returns:
+                cat = item['category']
+                specs = item['specs_removed']
+                client = item['client_name']
+                
+                if cat == "catraca":
+                    text += f"🔹 Catraca velha - Placa {specs.get('versao_placa', '')} (NS: {specs.get('numero_serie', '')} | MAC: {specs.get('mac_address', '')})\n   *Cliente:* {client}\n"
+                elif cat == "leitor":
+                    text += f"🔹 Leitor velho {specs.get('modelo', '')} (NS: {specs.get('numero_serie', '')} | MAC: {specs.get('mac_address', '')})\n   *Cliente:* {client}\n"
+                elif cat == "fonte":
+                    text += f"🔹 Fonte velha {specs.get('marca', '')} {specs.get('voltagem_corrente', '')}\n   *Cliente:* {client}\n"
+                elif cat == "antena":
+                    text += f"🔹 Antena velha {specs.get('tipo', '')} - {specs.get('modelo', '')}\n   *Cliente:* {client}\n"
+                else:
+                    text += f"🔹 {cat.capitalize()} velha\n   *Cliente:* {client}\n"
+                text += "\n"
+            
+            await query.message.reply_text(text, parse_mode='Markdown')
+        
         await show_main_menu(update, context)
     else:
         await query.message.reply_text("Opção desconhecida.")

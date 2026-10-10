@@ -75,10 +75,16 @@ async def prompt_inventory(update: Update, context: ContextTypes.DEFAULT_TYPE):
         qty = item['quantity']
         
         # Cria label do botão
-        if cat in ["catraca", "leitor"]:
-            label = f"{cat.capitalize()} - MAC: {specs.get('mac_address', 'N/A')}"
+        if cat == "catraca":
+            label = f"Catraca - Placa {specs.get('versao_placa', '')} (NS: {specs.get('numero_serie', '')})"
+        elif cat == "leitor":
+            label = f"Leitor {specs.get('modelo', '')} (NS: {specs.get('numero_serie', '')})"
+        elif cat == "fonte":
+            label = f"Fonte {specs.get('marca', '')} {specs.get('voltagem', '')} ({qty}x)"
+        elif cat == "antena":
+            label = f"Antena {specs.get('tipo', '')} - {specs.get('modelo', '')} ({qty}x)"
         else:
-            label = f"{cat.capitalize()} ({qty}x) - {specs.get('marca', specs.get('modelo', 'N/A'))}"
+            label = f"{cat.capitalize()} ({qty}x)"
             
         # O callback_data precisa ser curto (limite 64 bytes do telegram), passamos o ID
         keyboard.append([InlineKeyboardButton(label, callback_data=f"inv_{item['id']}")])
