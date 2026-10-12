@@ -26,6 +26,10 @@ async def start_use_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    from database.queries import get_or_create_user
+    if query.from_user:
+        get_or_create_user(query.from_user.id, query.from_user.first_name)
+
     await query.edit_message_text(
         "Você escolheu *📤 Usar Peça*.\n\nQual o *Nome do Cliente* onde o serviço foi realizado?",
         parse_mode="Markdown"

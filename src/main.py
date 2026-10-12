@@ -26,6 +26,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Responde ao comando /menu abrindo o menu interativo."""
+    user = update.effective_user
+    if user:
+        get_or_create_user(user.id, user.first_name)
     await show_main_menu(update, context)
 
 async def post_init(application):

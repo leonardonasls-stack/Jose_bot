@@ -3,7 +3,7 @@ import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, CommandHandler, filters
 
-from database.queries import get_pending_returns, dispatch_returns
+from database.queries import get_pending_returns, dispatch_returns, get_or_create_user
 from bot.handlers import show_main_menu, invalid_input
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,11 @@ async def start_rma(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_id = str(update.effective_user.id)
+    user = update.effective_user
+    if user:
+        get_or_create_user(user.id, user.first_name)
+
+    user_id = str(user.id)
     pending_items = get_pending_returns(user_id)
 
     if not pending_items:

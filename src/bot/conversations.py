@@ -29,6 +29,10 @@ async def start_add_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
+    from database.queries import get_or_create_user
+    if query.from_user:
+        get_or_create_user(query.from_user.id, query.from_user.first_name)
+
     keyboard = [
         [InlineKeyboardButton("Catraca Facial", callback_data="catraca")],
         [InlineKeyboardButton("Leitor Facial", callback_data="leitor")],
@@ -117,6 +121,11 @@ async def catraca_sn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         sn = parsed.get("numero_serie")
         mac = parsed.get("mac_address")
+        modelo = parsed.get("modelo") or parsed.get("marca")
+        if modelo and not context.user_data['add_specs'].get('versao_placa'):
+            context.user_data['add_specs']['versao_placa'] = modelo
+        elif not context.user_data['add_specs'].get('versao_placa'):
+            context.user_data['add_specs']['versao_placa'] = "Catraca Facial"
         
         if sn:
             context.user_data['add_specs']['numero_serie'] = sn
@@ -214,6 +223,8 @@ async def leitor_sn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if modelo and not context.user_data['add_specs'].get('modelo'):
             context.user_data['add_specs']['modelo'] = modelo
+        elif not context.user_data['add_specs'].get('modelo'):
+            context.user_data['add_specs']['modelo'] = "Leitor Facial"
         
         if sn:
             context.user_data['add_specs']['numero_serie'] = sn
@@ -302,11 +313,14 @@ async def antena_qtd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Finalização ---
 async def finish_add_item(update: Update, context: ContextTypes.DEFAULT_TYPE, quantity: int):
-    user_id = str(update.effective_user.id)
-    category = context.user_data['add_category']
-    specs = context.user_data['add_specs']
+    user = update.effective_user
+    user_id = str(user.id)
+    first_name = user.first_name or "Técnico"
+    category = context.user_data.get('add_category', 'peça')
+    specs = context.user_data.get('add_specs', {})
 
-    success = add_inventory(user_id, category, specs, quantity)
+    logger.info(f"finish_add_item: user_id={user_id}, category={category}, specs={specs}, quantity={quantity}")
+    success = add_inventory(user_id, category, specs, quantity, first_name=first_name)
 
     if success:
         text = "✅ *Peça adicionada com sucesso!*"

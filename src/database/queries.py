@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 def _check_client():
     if not db_conn:
-        logger.error("Conexão com o banco de dados não está inicializada (verifique o .env).")
+        logger.error("Conexão com o banco de dados não está disponível (verifique o .env).")
         return False
     return True
 
@@ -15,65 +15,73 @@ def get_or_create_user(telegram_id: int, first_name: str):
     if not _check_client(): return None
     try:
         with db_conn.cursor() as cur:
-            cur.execute("SELECT * FROM users WHERE telegram_id = %s", (telegram_id,))
-            user = cur.fetchone()
-            if user:
-                return user
-            
-            # Se vazio, cadastra
             cur.execute(
-                "INSERT INTO users (telegram_id, first_name) VALUES (%s, %s) RETURNING *",
-                (telegram_id, first_name)
+                "INSERT INTO users (telegram_id, first_name) VALUES (%s, %s) "
+                "ON CONFLICT (telegram_id) DO UPDATE SET first_name = EXCLUDED.first_name "
+                "RETURNING *",
+                (telegram_id, first_name or "Técnico")
             )
             return cur.fetchone()
     except Exception as e:
         logger.error(f"Erro ao buscar/criar usuário: {e}")
         return None
 
-def get_user_uuid_from_telegram(telegram_id_str: str):
-    """Obtém o UUID customizado da tabela users a partir do Telegram ID."""
-    if not _check_client(): return None
+def get_user_uuid_from_telegram(telegram_id_str: str, first_name: str = "Técnico"):
+    """Obtém o UUID customizado da tabela users a partir do Telegram ID. Cria o usuário se não existir."""
+    if not _check_client():
+        logger.error("get_user_uuid_from_telegram: Banco de dados indisponível.")
+        return None
     try:
         with db_conn.cursor() as cur:
             cur.execute("SELECT id FROM users WHERE telegram_id = %s", (int(telegram_id_str),))
             row = cur.fetchone()
             if row:
                 return row['id']
+
+            # Se não existir na tabela users, cadastra agora mesmo para não barrar o fluxo!
+            logger.info(f"Usuário Telegram ID {telegram_id_str} não encontrado no banco. Criando registro...")
+            cur.execute(
+                "INSERT INTO users (telegram_id, first_name) VALUES (%s, %s) "
+                "ON CONFLICT (telegram_id) DO UPDATE SET first_name = EXCLUDED.first_name "
+                "RETURNING id",
+                (int(telegram_id_str), first_name)
+            )
+            created_row = cur.fetchone()
+            if created_row:
+                return created_row['id']
     except Exception as e:
-        logger.error(f"Erro ao buscar UUID do usuário: {e}")
+        logger.error(f"Erro ao buscar/criar UUID do usuário {telegram_id_str}: {e}")
     return None
 
 def create_user(telegram_id: int, first_name: str):
     """Cadastra o usuário."""
-    if not _check_client(): return None
-    try:
-        with db_conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO users (telegram_id, first_name) VALUES (%s, %s) RETURNING *",
-                (telegram_id, first_name)
-            )
-            return cur.fetchone()
-    except Exception as e:
-        logger.error(f"Erro ao criar usuário: {e}")
-        return None
+    return get_or_create_user(telegram_id, first_name)
 
 # ==========================================
 # FASE 3: ENTRADA DE PEÇAS
 # ==========================================
-def add_inventory(user_id: str, category: str, specs: dict, quantity: int = 1):
+def add_inventory(user_id: str, category: str, specs: dict, quantity: int = 1, first_name: str = "Técnico"):
     """Adiciona uma peça ou um lote no estoque do técnico."""
-    if not _check_client(): return False
-    uuid = get_user_uuid_from_telegram(user_id)
-    if not uuid: return False
+    if not _check_client():
+        logger.error("add_inventory: Falha na conexão com o banco de dados.")
+        return False
+
+    uuid = get_user_uuid_from_telegram(user_id, first_name)
+    if not uuid:
+        logger.error(f"add_inventory: Não foi possível obter ou criar UUID para o usuário Telegram {user_id}.")
+        return False
+
     try:
+        specs_json = json.dumps(specs) if isinstance(specs, dict) else str(specs or "{}")
         with db_conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO inventory (user_id, category, specs, quantity) VALUES (%s, %s, %s, %s)",
-                (uuid, category, json.dumps(specs), quantity)
+                (uuid, category, specs_json, quantity)
             )
+        logger.info(f"Peça adicionada ao estoque com sucesso: user={user_id}, category={category}, specs={specs}, qty={quantity}")
         return True
     except Exception as e:
-        logger.error(f"Erro ao adicionar peça: {e}")
+        logger.exception(f"Erro ao adicionar peça ao banco de dados: {e}")
         return False
 
 def get_user_inventory(user_id: str):

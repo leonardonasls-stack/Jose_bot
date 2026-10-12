@@ -46,6 +46,10 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     
     # É obrigatório 'responder' a query para o Telegram parar de mostrar o ícone de carregamento no botão
     await query.answer() 
+
+    from database.queries import get_or_create_user
+    if query.from_user:
+        get_or_create_user(query.from_user.id, query.from_user.first_name)
     
     # Roteamento baseado no callback_data do botão
     data = query.data
