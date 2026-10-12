@@ -1,5 +1,4 @@
-import logging
-from telegram import Update
+from telegram import Update, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 from config import TELEGRAM_TOKEN, logger
 
@@ -25,6 +24,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Chama o menu logo em seguida
     await show_main_menu(update, context)
 
+async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Responde ao comando /menu abrindo o menu interativo."""
+    await show_main_menu(update, context)
+
+async def post_init(application):
+    """Registra a lista de comandos no botão de menu do Telegram."""
+    commands = [
+        BotCommand("menu", "Abrir o menu principal"),
+        BotCommand("start", "Reiniciar o atendimento"),
+        BotCommand("ocr", "Ler texto ou etiqueta de foto"),
+        BotCommand("cancel", "Cancelar operação atual")
+    ]
+    await application.bot.set_my_commands(commands)
+    logger.info("Bot commands configurados com sucesso no menu do Telegram.")
+
 def main():
     if not TELEGRAM_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN não encontrado! Verifique seu arquivo .env.")
@@ -32,11 +46,12 @@ def main():
 
     logger.info("Inicializando o bot...")
     
-    # Constrói a aplicação do bot com o token
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    # Constrói a aplicação do bot com o token e post_init
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     
-    # Registra o comando /start
+    # Registra os comandos básicos
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("menu", menu_command))
     
     # Registra o escutador de cliques nos botões (CallbackQueryHandler)
     # A ordem importa: primeiro os ConversationHandlers (mais específico), depois os callbacks genéricos
