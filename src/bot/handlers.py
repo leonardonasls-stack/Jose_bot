@@ -1,5 +1,8 @@
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, ConversationHandler
+
+logger = logging.getLogger(__name__)
 
 async def invalid_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
@@ -105,8 +108,20 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.message.reply_text(text, parse_mode='Markdown')
         
         await show_main_menu(update, context)
+    elif data in ["menu_add_item", "menu_use_item", "menu_rma"]:
+        # Se por algum motivo o callback de entrada na conversa passar direto para este handler:
+        if data == "menu_add_item":
+            from bot.conversations import start_add_item
+            return await start_add_item(update, context)
+        elif data == "menu_use_item":
+            from bot.conversation_use import start_use_item
+            return await start_use_item(update, context)
+        elif data == "menu_rma":
+            from bot.conversation_rma import start_rma
+            return await start_rma(update, context)
     else:
-        await query.message.reply_text("Opção desconhecida.")
+        logger.warning(f"Callback data não reconhecido recebido: {data}")
+        await query.message.reply_text("Opção não reconhecida. Use /menu para voltar ao menu principal.")
 
 async def ocr_photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Permite enviar foto diretamente fora dos fluxos para leitura e extração de texto/etiqueta."""
