@@ -47,6 +47,10 @@ def main():
         logger.error("TELEGRAM_BOT_TOKEN não encontrado! Verifique seu arquivo .env.")
         return
 
+    # Sincroniza e atualiza a estrutura do banco de dados automaticamente a cada deploy
+    from database.init_db import init_db
+    init_db()
+
     logger.info("Inicializando o bot...")
     
     # Constrói a aplicação do bot com o token e post_init

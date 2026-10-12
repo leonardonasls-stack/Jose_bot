@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS returns_to_hq (
 );
 
 -- Índices para melhorar a performance das consultas do bot
-CREATE INDEX idx_inventory_user_id ON inventory(user_id);
-CREATE INDEX idx_installations_user_id ON installations(user_id);
-CREATE INDEX idx_returns_user_id ON returns_to_hq(user_id);
-CREATE INDEX idx_returns_status ON returns_to_hq(status);
+CREATE INDEX IF NOT EXISTS idx_inventory_user_id ON inventory(user_id);
+CREATE INDEX IF NOT EXISTS idx_installations_user_id ON installations(user_id);
+CREATE INDEX IF NOT EXISTS idx_returns_user_id ON returns_to_hq(user_id);
+CREATE INDEX IF NOT EXISTS idx_returns_status ON returns_to_hq(status);

@@ -1,6 +1,7 @@
 import logging
 import json
 from config import db_conn
+from database.init_db import init_db
 
 logger = logging.getLogger(__name__)
 
