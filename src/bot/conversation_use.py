@@ -154,9 +154,9 @@ async def prompt_old_info_1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = "Vamos registrar a *sucata* retirada.\n\n"
     if cat == "catraca":
-        text += "Digite a *Versão da Placa* velha:"
+        text += "Digite a *Versão da Placa* velha (ou envie foto da etiqueta):"
     elif cat == "leitor":
-        text += "Digite o *Modelo* do Leitor velho:"
+        text += "Digite o *Modelo* do Leitor velho (ou envie foto da etiqueta):"
     elif cat == "fonte":
         text += "Digite a *Marca* da Fonte velha:"
     elif cat == "antena":
@@ -170,8 +170,38 @@ async def prompt_old_info_1(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_old_info_1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cat = context.user_data['use_data']['selected_item']['category']
+
+    if update.message.photo and cat in ["catraca", "leitor"]:
+        await update.message.reply_text("🔍 *Analisando foto da etiqueta da sucata...*", parse_mode="Markdown")
+        photo_file = await update.message.photo[-1].get_file()
+        image_bytes = await photo_file.download_as_bytearray()
+        parsed = parse_label_info(extract_text_from_bytes(bytes(image_bytes)))
+        
+        if cat == "catraca":
+            placa = parsed.get("modelo") or parsed.get("marca") or "Catraca Facial"
+            context.user_data['use_data']['old_specs']['versao_placa'] = placa
+        else:
+            modelo = parsed.get("modelo") or "Leitor Facial"
+            context.user_data['use_data']['old_specs']['modelo'] = modelo
+            
+        sn = parsed.get("numero_serie")
+        mac = parsed.get("mac_address")
+        
+        if sn:
+            context.user_data['use_data']['old_specs']['numero_serie'] = sn
+            if mac:
+                context.user_data['use_data']['old_specs']['mac_address'] = mac
+                item_desc = context.user_data['use_data']['old_specs'].get('modelo') or context.user_data['use_data']['old_specs'].get('versao_placa')
+                await update.message.reply_text(f"✅ Sucata identificada na foto!\n🔹 Modelo/Placa: `{item_desc}`\n🔹 S/N: `{sn}`\n🔹 MAC: `{mac}`\n\nFinalizando baixa...", parse_mode="Markdown")
+                return await finish_use_item(update, context)
+            else:
+                await update.message.reply_text(f"✅ Sucata identificada na foto!\n🔹 S/N: `{sn}`\n\nDigite o *MAC Address* velho (ou envie foto do MAC):", parse_mode="Markdown")
+                return USE_OLD_INFO_3
+        else:
+            await update.message.reply_text("✅ Dados lidos da foto.\nDigite o *Número de Série* velho (ou envie foto focada no número de série):", parse_mode="Markdown")
+            return USE_OLD_INFO_2
+
     text_input = update.message.text
-    
     if cat == "catraca":
         context.user_data['use_data']['old_specs']['versao_placa'] = text_input
         await update.message.reply_text("Digite o *Número de Série* velho (ou envie uma *foto* da etiqueta):", parse_mode="Markdown")
@@ -201,6 +231,10 @@ async def handle_old_info_2(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             sn = parsed.get("numero_serie")
             mac = parsed.get("mac_address")
+            modelo = parsed.get("modelo")
+            
+            if modelo and not context.user_data['use_data']['old_specs'].get('modelo'):
+                context.user_data['use_data']['old_specs']['modelo'] = modelo
             
             if sn:
                 context.user_data['use_data']['old_specs']['numero_serie'] = sn
@@ -215,7 +249,8 @@ async def handle_old_info_2(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await update.message.reply_text(msg, parse_mode="Markdown")
                     return USE_OLD_INFO_3
             else:
-                await update.message.reply_text("⚠️ Não identifiquei o Número de Série na imagem.\nPor favor, digite o *Número de Série* manualmente:", parse_mode="Markdown")
+                detalhe = f"\n\n📄 _Texto detectado:_ `{parsed.get('raw_text', '')[:120]}`" if parsed.get('raw_text') else ""
+                await update.message.reply_text(f"⚠️ Não identifiquei o Número de Série na imagem com clareza.{detalhe}\nPor favor, digite o *Número de Série* manualmente:", parse_mode="Markdown")
                 return USE_OLD_INFO_2
         else:
             context.user_data['use_data']['old_specs']['numero_serie'] = update.message.text
@@ -299,7 +334,7 @@ def get_use_item_conversation():
             ],
             USE_CHOOSE_ITEM: [CallbackQueryHandler(handle_choose_item)],
             USE_ITEM_QTD: [MessageHandler(filters.TEXT & ~filters.COMMAND, use_item_qtd)],
-            USE_OLD_INFO_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_old_info_1)],
+            USE_OLD_INFO_1: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_old_info_1)],
             USE_OLD_INFO_2: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_old_info_2)],
             USE_OLD_INFO_3: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_old_info_3)],
         },

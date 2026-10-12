@@ -58,10 +58,10 @@ async def handle_category_choice(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data['add_specs'] = {}
 
     if category == "catraca":
-        await query.edit_message_text("Você selecionou *Catraca Facial*.\n\nDigite a *Versão da Placa*:", parse_mode="Markdown")
+        await query.edit_message_text("Você selecionou *Catraca Facial*.\n\nDigite a *Versão da Placa* (ou envie uma *foto* da etiqueta):", parse_mode="Markdown")
         return CATRACA_PLACA
     elif category == "leitor":
-        await query.edit_message_text("Você selecionou *Leitor Facial*.\n\nDigite o *Modelo* do Leitor:", parse_mode="Markdown")
+        await query.edit_message_text("Você selecionou *Leitor Facial*.\n\nDigite o *Modelo* do Leitor (ou envie uma *foto* da etiqueta):", parse_mode="Markdown")
         return LEITOR_MODELO
     elif category == "fonte":
         await query.edit_message_text("Você selecionou *Fonte de Alimentação*.\n\nDigite a *Marca*:", parse_mode="Markdown")
@@ -77,9 +77,36 @@ async def handle_category_choice(update: Update, context: ContextTypes.DEFAULT_T
 
 # --- Fluxo: Catraca Facial ---
 async def catraca_placa(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['add_specs']['versao_placa'] = update.message.text
-    await update.message.reply_text("Digite o *Número de Série* (ou envie uma *foto* da etiqueta):", parse_mode="Markdown")
-    return CATRACA_SN
+    if update.message.photo:
+        await update.message.reply_text("🔍 *Analisando foto da etiqueta...*", parse_mode="Markdown")
+        photo_file = await update.message.photo[-1].get_file()
+        image_bytes = await photo_file.download_as_bytearray()
+        parsed = parse_label_info(extract_text_from_bytes(bytes(image_bytes)))
+        
+        placa = parsed.get("modelo") or parsed.get("marca") or "Catraca Facial"
+        context.user_data['add_specs']['versao_placa'] = placa
+        
+        sn = parsed.get("numero_serie")
+        mac = parsed.get("mac_address")
+        
+        if sn:
+            context.user_data['add_specs']['numero_serie'] = sn
+            if mac:
+                context.user_data['add_specs']['mac_address'] = mac
+                msg = f"✅ *Foto lida com sucesso!*\n🔹 *Placa/Modelo:* `{placa}`\n🔹 *Nº Série:* `{sn}`\n🔹 *MAC:* `{mac}`\n\nFinalizando cadastro..."
+                await update.message.reply_text(msg, parse_mode="Markdown")
+                return await finish_add_item(update, context, quantity=1)
+            else:
+                msg = f"✅ *Dados identificados:*\n🔹 *Placa/Modelo:* `{placa}`\n🔹 *Nº Série:* `{sn}`\n\nDigite o *MAC Address* (ou envie foto do MAC):"
+                await update.message.reply_text(msg, parse_mode="Markdown")
+                return CATRACA_MAC
+        else:
+            await update.message.reply_text(f"✅ Placa identificada: `{placa}`\n\nDigite o *Número de Série* (ou envie foto da etiqueta):", parse_mode="Markdown")
+            return CATRACA_SN
+    else:
+        context.user_data['add_specs']['versao_placa'] = update.message.text
+        await update.message.reply_text("Digite o *Número de Série* (ou envie uma *foto* da etiqueta):", parse_mode="Markdown")
+        return CATRACA_SN
 
 async def catraca_sn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.photo:
@@ -104,7 +131,8 @@ async def catraca_sn(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(msg, parse_mode="Markdown")
                 return CATRACA_MAC
         else:
-            await update.message.reply_text("⚠️ Não consegui identificar o Número de Série na imagem com clareza.\nPor favor, digite o *Número de Série* manualmente:", parse_mode="Markdown")
+            detalhe = f"\n\n📄 _Texto detectado:_ `{parsed.get('raw_text', '')[:120]}`" if parsed.get('raw_text') else ""
+            await update.message.reply_text(f"⚠️ Não consegui identificar o Número de Série na imagem com clareza.{detalhe}\nPor favor, digite o *Número de Série* manualmente:", parse_mode="Markdown")
             return CATRACA_SN
     else:
         context.user_data['add_specs']['numero_serie'] = update.message.text
@@ -132,9 +160,46 @@ async def catraca_mac(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- Fluxo: Leitor Facial ---
 async def leitor_modelo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['add_specs']['modelo'] = update.message.text
-    await update.message.reply_text("Digite o *Número de Série* (ou envie uma *foto* da etiqueta):", parse_mode="Markdown")
-    return LEITOR_SN
+    if update.message.photo:
+        await update.message.reply_text("🔍 *Analisando foto da etiqueta...*", parse_mode="Markdown")
+        photo_file = await update.message.photo[-1].get_file()
+        image_bytes = await photo_file.download_as_bytearray()
+        parsed = parse_label_info(extract_text_from_bytes(bytes(image_bytes)))
+        
+        modelo = parsed.get("modelo")
+        sn = parsed.get("numero_serie")
+        mac = parsed.get("mac_address")
+        
+        if modelo:
+            context.user_data['add_specs']['modelo'] = modelo
+        if sn:
+            context.user_data['add_specs']['numero_serie'] = sn
+        if mac:
+            context.user_data['add_specs']['mac_address'] = mac
+
+        if modelo and sn:
+            if mac:
+                msg = f"✅ *Foto lida com sucesso!*\n🔹 *Modelo:* `{modelo}`\n🔹 *Nº Série:* `{sn}`\n🔹 *MAC:* `{mac}`\n\nFinalizando cadastro..."
+                await update.message.reply_text(msg, parse_mode="Markdown")
+                return await finish_add_item(update, context, quantity=1)
+            else:
+                msg = f"✅ *Dados identificados:*\n🔹 *Modelo:* `{modelo}`\n🔹 *Nº Série:* `{sn}`\n\nDigite o *MAC Address* (ou envie foto do MAC):"
+                await update.message.reply_text(msg, parse_mode="Markdown")
+                return LEITOR_MAC
+        elif modelo and not sn:
+            await update.message.reply_text(f"✅ *Modelo identificado:* `{modelo}`\n\nDigite o *Número de Série* (ou envie foto da etiqueta):", parse_mode="Markdown")
+            return LEITOR_SN
+        elif sn and not modelo:
+            await update.message.reply_text(f"✅ *Número de Série identificado:* `{sn}`\n\nDigite o *Modelo* do Leitor:", parse_mode="Markdown")
+            return LEITOR_MODELO
+        else:
+            detalhe = f"\n\n📄 _Texto detectado:_ `{parsed.get('raw_text', '')[:120]}`" if parsed.get('raw_text') else ""
+            await update.message.reply_text(f"⚠️ Não consegui identificar os dados na foto.{detalhe}\nPor favor, digite o *Modelo* do leitor manualmente:", parse_mode="Markdown")
+            return LEITOR_MODELO
+    else:
+        context.user_data['add_specs']['modelo'] = update.message.text
+        await update.message.reply_text("Digite o *Número de Série* (ou envie uma *foto* da etiqueta):", parse_mode="Markdown")
+        return LEITOR_SN
 
 async def leitor_sn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.photo:
@@ -145,6 +210,10 @@ async def leitor_sn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         sn = parsed.get("numero_serie")
         mac = parsed.get("mac_address")
+        modelo = parsed.get("modelo")
+        
+        if modelo and not context.user_data['add_specs'].get('modelo'):
+            context.user_data['add_specs']['modelo'] = modelo
         
         if sn:
             context.user_data['add_specs']['numero_serie'] = sn
@@ -159,7 +228,8 @@ async def leitor_sn(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(msg, parse_mode="Markdown")
                 return LEITOR_MAC
         else:
-            await update.message.reply_text("⚠️ Não consegui identificar o Número de Série na imagem com clareza.\nPor favor, digite o *Número de Série* manualmente:", parse_mode="Markdown")
+            detalhe = f"\n\n📄 _Texto detectado:_ `{parsed.get('raw_text', '')[:120]}`" if parsed.get('raw_text') else ""
+            await update.message.reply_text(f"⚠️ Não consegui identificar o Número de Série na imagem com clareza.{detalhe}\nPor favor, digite o *Número de Série* manualmente:", parse_mode="Markdown")
             return LEITOR_SN
     else:
         context.user_data['add_specs']['numero_serie'] = update.message.text
@@ -268,11 +338,11 @@ def get_add_item_conversation():
         states={
             CHOOSE_CATEGORY: [CallbackQueryHandler(handle_category_choice)],
             
-            CATRACA_PLACA: [MessageHandler(filters.TEXT & ~filters.COMMAND, catraca_placa)],
+            CATRACA_PLACA: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, catraca_placa)],
             CATRACA_SN: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, catraca_sn)],
             CATRACA_MAC: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, catraca_mac)],
             
-            LEITOR_MODELO: [MessageHandler(filters.TEXT & ~filters.COMMAND, leitor_modelo)],
+            LEITOR_MODELO: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, leitor_modelo)],
             LEITOR_SN: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, leitor_sn)],
             LEITOR_MAC: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, leitor_mac)],
             

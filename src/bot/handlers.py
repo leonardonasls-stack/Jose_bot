@@ -139,6 +139,10 @@ async def ocr_photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parsed = parse_label_info(raw_text)
 
     msg = "📷 *Resultado da Leitura de Imagem (OCR)*\n\n"
+    if parsed.get("marca"):
+        msg += f"🏷️ *Marca:* `{parsed['marca']}`\n"
+    if parsed.get("modelo"):
+        msg += f"📦 *Modelo:* `{parsed['modelo']}`\n"
     if parsed.get("numero_serie"):
         msg += f"🔢 *Número de Série (S/N):* `{parsed['numero_serie']}`\n"
     if parsed.get("mac_address"):
