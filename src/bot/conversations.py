@@ -5,6 +5,7 @@ from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler
 
 from database.queries import add_inventory
 from bot.handlers import show_main_menu, invalid_input
+from bot.ocr_service import extract_text_from_bytes, parse_label_info
 
 logger = logging.getLogger(__name__)
 
@@ -77,34 +78,112 @@ async def handle_category_choice(update: Update, context: ContextTypes.DEFAULT_T
 # --- Fluxo: Catraca Facial ---
 async def catraca_placa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['add_specs']['versao_placa'] = update.message.text
-    await update.message.reply_text("Digite o *Número de Série*:", parse_mode="Markdown")
+    await update.message.reply_text("Digite o *Número de Série* (ou envie uma *foto* da etiqueta):", parse_mode="Markdown")
     return CATRACA_SN
 
 async def catraca_sn(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['add_specs']['numero_serie'] = update.message.text
-    await update.message.reply_text("Digite o *MAC Address*:", parse_mode="Markdown")
-    return CATRACA_MAC
+    if update.message.photo:
+        await update.message.reply_text("🔍 *Analisando foto da etiqueta...*", parse_mode="Markdown")
+        photo_file = await update.message.photo[-1].get_file()
+        image_bytes = await photo_file.download_as_bytearray()
+        parsed = parse_label_info(extract_text_from_bytes(bytes(image_bytes)))
+        
+        sn = parsed.get("numero_serie")
+        mac = parsed.get("mac_address")
+        
+        if sn:
+            context.user_data['add_specs']['numero_serie'] = sn
+            msg = f"✅ Número de Série identificado: `{sn}`\n"
+            if mac:
+                context.user_data['add_specs']['mac_address'] = mac
+                msg += f"✅ MAC Address também identificado: `{mac}`\n\nFinalizando cadastro..."
+                await update.message.reply_text(msg, parse_mode="Markdown")
+                return await finish_add_item(update, context, quantity=1)
+            else:
+                msg += "Digite o *MAC Address* (ou envie uma foto do MAC):"
+                await update.message.reply_text(msg, parse_mode="Markdown")
+                return CATRACA_MAC
+        else:
+            await update.message.reply_text("⚠️ Não consegui identificar o Número de Série na imagem com clareza.\nPor favor, digite o *Número de Série* manualmente:", parse_mode="Markdown")
+            return CATRACA_SN
+    else:
+        context.user_data['add_specs']['numero_serie'] = update.message.text
+        await update.message.reply_text("Digite o *MAC Address* (ou envie uma foto):", parse_mode="Markdown")
+        return CATRACA_MAC
 
 async def catraca_mac(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    mac_formatado = format_mac_address(update.message.text)
-    context.user_data['add_specs']['mac_address'] = mac_formatado
-    return await finish_add_item(update, context, quantity=1)
+    if update.message.photo:
+        await update.message.reply_text("🔍 *Analisando foto do MAC...*", parse_mode="Markdown")
+        photo_file = await update.message.photo[-1].get_file()
+        image_bytes = await photo_file.download_as_bytearray()
+        parsed = parse_label_info(extract_text_from_bytes(bytes(image_bytes)))
+        mac = parsed.get("mac_address")
+        if mac:
+            context.user_data['add_specs']['mac_address'] = mac
+            await update.message.reply_text(f"✅ MAC Address identificado: `{mac}`", parse_mode="Markdown")
+            return await finish_add_item(update, context, quantity=1)
+        else:
+            await update.message.reply_text("⚠️ Não consegui identificar o MAC Address na foto.\nPor favor, digite o *MAC Address* manualmente:", parse_mode="Markdown")
+            return CATRACA_MAC
+    else:
+        mac_formatado = format_mac_address(update.message.text)
+        context.user_data['add_specs']['mac_address'] = mac_formatado
+        return await finish_add_item(update, context, quantity=1)
 
 # --- Fluxo: Leitor Facial ---
 async def leitor_modelo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['add_specs']['modelo'] = update.message.text
-    await update.message.reply_text("Digite o *Número de Série*:", parse_mode="Markdown")
+    await update.message.reply_text("Digite o *Número de Série* (ou envie uma *foto* da etiqueta):", parse_mode="Markdown")
     return LEITOR_SN
 
 async def leitor_sn(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['add_specs']['numero_serie'] = update.message.text
-    await update.message.reply_text("Digite o *MAC Address*:", parse_mode="Markdown")
-    return LEITOR_MAC
+    if update.message.photo:
+        await update.message.reply_text("🔍 *Analisando foto da etiqueta...*", parse_mode="Markdown")
+        photo_file = await update.message.photo[-1].get_file()
+        image_bytes = await photo_file.download_as_bytearray()
+        parsed = parse_label_info(extract_text_from_bytes(bytes(image_bytes)))
+        
+        sn = parsed.get("numero_serie")
+        mac = parsed.get("mac_address")
+        
+        if sn:
+            context.user_data['add_specs']['numero_serie'] = sn
+            msg = f"✅ Número de Série identificado: `{sn}`\n"
+            if mac:
+                context.user_data['add_specs']['mac_address'] = mac
+                msg += f"✅ MAC Address também identificado: `{mac}`\n\nFinalizando cadastro..."
+                await update.message.reply_text(msg, parse_mode="Markdown")
+                return await finish_add_item(update, context, quantity=1)
+            else:
+                msg += "Digite o *MAC Address* (ou envie uma foto do MAC):"
+                await update.message.reply_text(msg, parse_mode="Markdown")
+                return LEITOR_MAC
+        else:
+            await update.message.reply_text("⚠️ Não consegui identificar o Número de Série na imagem com clareza.\nPor favor, digite o *Número de Série* manualmente:", parse_mode="Markdown")
+            return LEITOR_SN
+    else:
+        context.user_data['add_specs']['numero_serie'] = update.message.text
+        await update.message.reply_text("Digite o *MAC Address* (ou envie uma foto):", parse_mode="Markdown")
+        return LEITOR_MAC
 
 async def leitor_mac(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    mac_formatado = format_mac_address(update.message.text)
-    context.user_data['add_specs']['mac_address'] = mac_formatado
-    return await finish_add_item(update, context, quantity=1)
+    if update.message.photo:
+        await update.message.reply_text("🔍 *Analisando foto do MAC...*", parse_mode="Markdown")
+        photo_file = await update.message.photo[-1].get_file()
+        image_bytes = await photo_file.download_as_bytearray()
+        parsed = parse_label_info(extract_text_from_bytes(bytes(image_bytes)))
+        mac = parsed.get("mac_address")
+        if mac:
+            context.user_data['add_specs']['mac_address'] = mac
+            await update.message.reply_text(f"✅ MAC Address identificado: `{mac}`", parse_mode="Markdown")
+            return await finish_add_item(update, context, quantity=1)
+        else:
+            await update.message.reply_text("⚠️ Não consegui identificar o MAC Address na foto.\nPor favor, digite o *MAC Address* manualmente:", parse_mode="Markdown")
+            return LEITOR_MAC
+    else:
+        mac_formatado = format_mac_address(update.message.text)
+        context.user_data['add_specs']['mac_address'] = mac_formatado
+        return await finish_add_item(update, context, quantity=1)
 
 # --- Fluxo: Fonte de Alimentação ---
 async def fonte_marca(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -190,12 +269,12 @@ def get_add_item_conversation():
             CHOOSE_CATEGORY: [CallbackQueryHandler(handle_category_choice)],
             
             CATRACA_PLACA: [MessageHandler(filters.TEXT & ~filters.COMMAND, catraca_placa)],
-            CATRACA_SN: [MessageHandler(filters.TEXT & ~filters.COMMAND, catraca_sn)],
-            CATRACA_MAC: [MessageHandler(filters.TEXT & ~filters.COMMAND, catraca_mac)],
+            CATRACA_SN: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, catraca_sn)],
+            CATRACA_MAC: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, catraca_mac)],
             
             LEITOR_MODELO: [MessageHandler(filters.TEXT & ~filters.COMMAND, leitor_modelo)],
-            LEITOR_SN: [MessageHandler(filters.TEXT & ~filters.COMMAND, leitor_sn)],
-            LEITOR_MAC: [MessageHandler(filters.TEXT & ~filters.COMMAND, leitor_mac)],
+            LEITOR_SN: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, leitor_sn)],
+            LEITOR_MAC: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, leitor_mac)],
             
             FONTE_MARCA: [MessageHandler(filters.TEXT & ~filters.COMMAND, fonte_marca)],
             FONTE_VOLTAGEM: [MessageHandler(filters.TEXT & ~filters.COMMAND, fonte_voltagem)],

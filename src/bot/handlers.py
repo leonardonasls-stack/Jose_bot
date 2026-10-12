@@ -107,3 +107,29 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         await show_main_menu(update, context)
     else:
         await query.message.reply_text("Opção desconhecida.")
+
+async def ocr_photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Permite enviar foto diretamente fora dos fluxos para leitura e extração de texto/etiqueta."""
+    from bot.ocr_service import extract_text_from_bytes, parse_label_info
+    
+    if not update.message.photo:
+        await update.message.reply_text("Envie uma foto ou imagem para extração de texto.")
+        return
+
+    await update.message.reply_text("🔍 *Processando imagem com OCR...*", parse_mode="Markdown")
+    photo_file = await update.message.photo[-1].get_file()
+    image_bytes = await photo_file.download_as_bytearray()
+    
+    raw_text = extract_text_from_bytes(bytes(image_bytes))
+    parsed = parse_label_info(raw_text)
+
+    msg = "📷 *Resultado da Leitura de Imagem (OCR)*\n\n"
+    if parsed.get("numero_serie"):
+        msg += f"🔢 *Número de Série (S/N):* `{parsed['numero_serie']}`\n"
+    if parsed.get("mac_address"):
+        msg += f"🌐 *MAC Address:* `{parsed['mac_address']}`\n"
+
+    msg += "\n📄 *Texto Completo Detectado:*\n"
+    msg += f"```\n{raw_text if raw_text else '(Nenhum texto legível encontrado)'}\n```"
+
+    await update.message.reply_text(msg, parse_mode="Markdown")

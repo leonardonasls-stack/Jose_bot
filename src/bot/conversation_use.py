@@ -5,6 +5,8 @@ from telegram.ext import ContextTypes, ConversationHandler, CallbackQueryHandler
 
 from database.queries import get_user_inventory, use_inventory_item, register_installation, add_return_to_hq
 from bot.handlers import show_main_menu, invalid_input
+from bot.conversations import format_mac_address
+from bot.ocr_service import extract_text_from_bytes, parse_label_info
 
 logger = logging.getLogger(__name__)
 
@@ -172,11 +174,11 @@ async def handle_old_info_1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if cat == "catraca":
         context.user_data['use_data']['old_specs']['versao_placa'] = text_input
-        await update.message.reply_text("Digite o *Número de Série* velho:", parse_mode="Markdown")
+        await update.message.reply_text("Digite o *Número de Série* velho (ou envie uma *foto* da etiqueta):", parse_mode="Markdown")
         return USE_OLD_INFO_2
     elif cat == "leitor":
         context.user_data['use_data']['old_specs']['modelo'] = text_input
-        await update.message.reply_text("Digite o *Número de Série* velho:", parse_mode="Markdown")
+        await update.message.reply_text("Digite o *Número de Série* velho (ou envie uma *foto* da etiqueta):", parse_mode="Markdown")
         return USE_OLD_INFO_2
     elif cat == "fonte":
         context.user_data['use_data']['old_specs']['marca'] = text_input
@@ -189,25 +191,61 @@ async def handle_old_info_1(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_old_info_2(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cat = context.user_data['use_data']['selected_item']['category']
-    text_input = update.message.text
     
     if cat in ["catraca", "leitor"]:
-        context.user_data['use_data']['old_specs']['numero_serie'] = text_input
-        await update.message.reply_text("Digite o *MAC Address* velho:", parse_mode="Markdown")
-        return USE_OLD_INFO_3
+        if update.message.photo:
+            await update.message.reply_text("🔍 *Analisando foto da etiqueta da sucata...*", parse_mode="Markdown")
+            photo_file = await update.message.photo[-1].get_file()
+            image_bytes = await photo_file.download_as_bytearray()
+            parsed = parse_label_info(extract_text_from_bytes(bytes(image_bytes)))
+            
+            sn = parsed.get("numero_serie")
+            mac = parsed.get("mac_address")
+            
+            if sn:
+                context.user_data['use_data']['old_specs']['numero_serie'] = sn
+                msg = f"✅ Número de Série velho identificado: `{sn}`\n"
+                if mac:
+                    context.user_data['use_data']['old_specs']['mac_address'] = mac
+                    msg += f"✅ MAC Address velho também identificado: `{mac}`\n\nFinalizando baixa..."
+                    await update.message.reply_text(msg, parse_mode="Markdown")
+                    return await finish_use_item(update, context)
+                else:
+                    msg += "Digite o *MAC Address* velho (ou envie uma foto):"
+                    await update.message.reply_text(msg, parse_mode="Markdown")
+                    return USE_OLD_INFO_3
+            else:
+                await update.message.reply_text("⚠️ Não identifiquei o Número de Série na imagem.\nPor favor, digite o *Número de Série* manualmente:", parse_mode="Markdown")
+                return USE_OLD_INFO_2
+        else:
+            context.user_data['use_data']['old_specs']['numero_serie'] = update.message.text
+            await update.message.reply_text("Digite o *MAC Address* velho (ou envie uma foto):", parse_mode="Markdown")
+            return USE_OLD_INFO_3
     elif cat == "fonte":
-        context.user_data['use_data']['old_specs']['voltagem_corrente'] = text_input
+        context.user_data['use_data']['old_specs']['voltagem_corrente'] = update.message.text
         return await finish_use_item(update, context)
     elif cat == "antena":
-        context.user_data['use_data']['old_specs']['modelo'] = text_input
+        context.user_data['use_data']['old_specs']['modelo'] = update.message.text
         return await finish_use_item(update, context)
 
-from bot.conversations import format_mac_address
-
 async def handle_old_info_3(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    mac_formatado = format_mac_address(update.message.text)
-    context.user_data['use_data']['old_specs']['mac_address'] = mac_formatado
-    return await finish_use_item(update, context)
+    if update.message.photo:
+        await update.message.reply_text("🔍 *Analisando foto do MAC da sucata...*", parse_mode="Markdown")
+        photo_file = await update.message.photo[-1].get_file()
+        image_bytes = await photo_file.download_as_bytearray()
+        parsed = parse_label_info(extract_text_from_bytes(bytes(image_bytes)))
+        mac = parsed.get("mac_address")
+        if mac:
+            context.user_data['use_data']['old_specs']['mac_address'] = mac
+            await update.message.reply_text(f"✅ MAC Address velho identificado: `{mac}`", parse_mode="Markdown")
+            return await finish_use_item(update, context)
+        else:
+            await update.message.reply_text("⚠️ Não consegui identificar o MAC Address na foto.\nPor favor, digite o *MAC Address* manualmente:", parse_mode="Markdown")
+            return USE_OLD_INFO_3
+    else:
+        mac_formatado = format_mac_address(update.message.text)
+        context.user_data['use_data']['old_specs']['mac_address'] = mac_formatado
+        return await finish_use_item(update, context)
 
 async def finish_use_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     use_data = context.user_data['use_data']
@@ -262,8 +300,8 @@ def get_use_item_conversation():
             USE_CHOOSE_ITEM: [CallbackQueryHandler(handle_choose_item)],
             USE_ITEM_QTD: [MessageHandler(filters.TEXT & ~filters.COMMAND, use_item_qtd)],
             USE_OLD_INFO_1: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_old_info_1)],
-            USE_OLD_INFO_2: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_old_info_2)],
-            USE_OLD_INFO_3: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_old_info_3)],
+            USE_OLD_INFO_2: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_old_info_2)],
+            USE_OLD_INFO_3: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, handle_old_info_3)],
         },
         fallbacks=[
             CommandHandler("cancel", cancel_use),

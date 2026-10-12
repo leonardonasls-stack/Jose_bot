@@ -3,10 +3,13 @@ FROM python:3.11-slim
 # Define o diretório de trabalho dentro do contêiner
 WORKDIR /app
 
-# Instala dependências do sistema, úteis para compilar pacotes ou interagir com o PostgreSQL
+# Instala dependências do sistema, úteis para compilar pacotes, interagir com o PostgreSQL e OCR
 RUN apt-get update && apt-get install -y \
     libpq-dev \
     gcc \
+    tesseract-ocr \
+    tesseract-ocr-por \
+    tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 # Copia os arquivos de dependências

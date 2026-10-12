@@ -43,9 +43,13 @@ def main():
     from bot.conversations import get_add_item_conversation
     from bot.conversation_use import get_use_item_conversation
     from bot.conversation_rma import get_rma_conversation
+    from bot.handlers import ocr_photo_command
+    from telegram.ext import filters, MessageHandler
     app.add_handler(get_add_item_conversation())
     app.add_handler(get_use_item_conversation())
     app.add_handler(get_rma_conversation())
+    app.add_handler(CommandHandler("ocr", ocr_photo_command))
+    app.add_handler(MessageHandler(filters.PHOTO & ~filters.COMMAND, ocr_photo_command))
     app.add_handler(CallbackQueryHandler(button_click_handler))
 
     # Mantém o bot rodando e escutando mensagens
