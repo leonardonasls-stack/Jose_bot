@@ -26,16 +26,45 @@ async def start_use_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    from database.queries import get_or_create_user
+    from database.queries import get_or_create_user, get_user_inventory
     if query.from_user:
         get_or_create_user(query.from_user.id, query.from_user.first_name)
+
+    context.user_data['use_data'] = {}
+    user_id = str(query.from_user.id)
+    data = query.data or ""
+
+    # Se veio de um clique direto no botão 'Usar Peça' dentro de Meu Estoque
+    if data.startswith("use_item_direct_"):
+        item_id = data.replace("use_item_direct_", "")
+        inventory = get_user_inventory(user_id)
+        selected_item = next((i for i in inventory if str(i['id']) == item_id), None)
+        if selected_item:
+            context.user_data['use_data']['selected_item'] = selected_item
+            cat = (selected_item.get('category') or '').lower()
+            specs = selected_item.get('specs') or {}
+
+            if cat == "leitor":
+                item_desc = f"Leitor {specs.get('modelo', '')} (S/N: `{specs.get('numero_serie', 'N/A')}`)"
+            elif cat == "catraca":
+                item_desc = f"Catraca - Placa {specs.get('versao_placa', '')} (S/N: `{specs.get('numero_serie', 'N/A')}`)"
+            elif cat == "fonte":
+                item_desc = f"Fonte {specs.get('marca', '')} {specs.get('voltagem', '')}"
+            elif cat == "antena":
+                item_desc = f"Antena {specs.get('tipo', '')} - {specs.get('modelo', '')}"
+            else:
+                item_desc = cat.capitalize()
+
+            await query.edit_message_text(
+                f"Você escolheu usar:\n🔹 *{item_desc}*\n\nQual o *Nome do Cliente* onde o serviço foi realizado?",
+                parse_mode="Markdown"
+            )
+            return USE_CLIENT_NAME
 
     await query.edit_message_text(
         "Você escolheu *📤 Usar Peça*.\n\nQual o *Nome do Cliente* onde o serviço foi realizado?",
         parse_mode="Markdown"
     )
-    # Limpa estado anterior
-    context.user_data['use_data'] = {}
     return USE_CLIENT_NAME
 
 async def use_client_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -61,6 +90,21 @@ async def use_date_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await prompt_inventory(update, context)
 
 async def prompt_inventory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Se o item já foi pré-selecionado pelo clique em Meu Estoque
+    selected_item = context.user_data.get('use_data', {}).get('selected_item')
+    if selected_item:
+        cat = (selected_item.get('category') or '').lower()
+        if cat in ["fonte", "antena"]:
+            text = f"Quantas unidades de *{cat.capitalize()}* você instalou?"
+            if update.message:
+                await update.message.reply_text(text, parse_mode="Markdown")
+            else:
+                await update.callback_query.edit_message_text(text, parse_mode="Markdown")
+            return USE_ITEM_QTD
+        else:
+            context.user_data['use_data']['quantity_used'] = 1
+            return await prompt_old_info_1(update, context)
+
     user_id = str(update.effective_user.id)
     inventory = get_user_inventory(user_id)
     
@@ -329,7 +373,7 @@ async def cancel_use(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def get_use_item_conversation():
     return ConversationHandler(
-        entry_points=[CallbackQueryHandler(start_use_item, pattern="^menu_use_item$")],
+        entry_points=[CallbackQueryHandler(start_use_item, pattern="^(menu_use_item|use_item_direct_.+)$")],
         states={
             USE_CLIENT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, use_client_name)],
             USE_DATE: [

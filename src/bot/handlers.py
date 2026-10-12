@@ -40,6 +40,185 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif update.callback_query:
         await update.callback_query.message.edit_text(text, reply_markup=reply_markup, parse_mode='Markdown')
 
+def get_product_group_name(item: dict) -> str:
+    """Retorna o nome amigável do modelo ou tipo de produto para agrupamento."""
+    cat = (item.get('category') or '').lower()
+    specs = item.get('specs') or {}
+    if cat == 'leitor':
+        return specs.get('modelo') or 'Leitor Facial'
+    elif cat == 'catraca':
+        return specs.get('versao_placa') or 'Catraca Facial'
+    elif cat == 'fonte':
+        marca = specs.get('marca', '').strip()
+        volt = specs.get('voltagem', '').strip()
+        txt = f"Fonte {marca} {volt}".strip()
+        return txt if txt else "Fonte de Alimentação"
+    elif cat == 'antena':
+        tipo = specs.get('tipo', '').strip()
+        mod = specs.get('modelo', '').strip()
+        txt = f"Antena {tipo} {mod}".strip()
+        return txt if txt else "Placa de Antena"
+    return cat.capitalize() or "Outros"
+
+async def show_stock_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Exibe os tipos de produtos no estoque do técnico como botões interativos."""
+    from database.queries import get_user_inventory
+    user = update.effective_user
+    user_id = str(user.id)
+    inventory = get_user_inventory(user_id)
+
+    if not inventory:
+        text = "📦 *Meu Estoque*\n\nSeu estoque está vazio no momento."
+        keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="back_to_menu")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        else:
+            await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        return
+
+    # Agrupa por tipo de produto (modelo / placa / fonte)
+    grouped = {}
+    for item in inventory:
+        grp = get_product_group_name(item)
+        grouped.setdefault(grp, []).append(item)
+
+    group_names = sorted(list(grouped.keys()))
+    context.user_data['stock_group_names'] = group_names
+
+    keyboard = []
+    for idx, grp_name in enumerate(group_names):
+        items = grouped[grp_name]
+        total_qty = sum(i.get('quantity', 1) for i in items)
+
+        icon = "📱" if any(w in grp_name.lower() for w in ["face", "leitor", "facial"]) else (
+               "🚪" if any(w in grp_name.lower() for w in ["block", "catraca", "placa"]) else (
+               "⚡" if "fonte" in grp_name.lower() else "📡"
+        ))
+        btn_text = f"{icon} {grp_name} ({total_qty} unid.)"
+        keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"stk_g_{idx}")])
+
+    keyboard.append([InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="back_to_menu")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    text = "📦 *Meu Estoque*\n\nSelecione um *tipo de produto* para ver os dispositivos disponíveis:"
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
+async def show_stock_group_items(update: Update, context: ContextTypes.DEFAULT_TYPE, group_idx: int):
+    """Exibe os dispositivos individuais pertencentes ao tipo selecionado."""
+    from database.queries import get_user_inventory
+    user = update.effective_user
+    user_id = str(user.id)
+    inventory = get_user_inventory(user_id)
+    group_names = context.user_data.get('stock_group_names', [])
+
+    if group_idx >= len(group_names):
+        return await show_stock_categories(update, context)
+
+    grp_name = group_names[group_idx]
+    items_in_group = [i for i in inventory if get_product_group_name(i) == grp_name]
+
+    if not items_in_group:
+        return await show_stock_categories(update, context)
+
+    keyboard = []
+    for item in items_in_group:
+        cat = (item.get('category') or '').lower()
+        specs = item.get('specs') or {}
+        qty = item.get('quantity', 1)
+
+        if cat in ['leitor', 'catraca']:
+            sn = specs.get('numero_serie', 'S/N N/A')
+            mac = specs.get('mac_address')
+            if mac:
+                mac_suffix = f" (MAC: {mac})"
+            else:
+                mac_suffix = ""
+            label = f"🔹 NS: {sn}{mac_suffix}"
+        else:
+            label = f"🔹 Lote com {qty} unidade(s)"
+
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"stk_i_{item['id']}")])
+
+    keyboard.append([InlineKeyboardButton("⬅️ Voltar aos Tipos", callback_data="menu_view_stock")])
+    keyboard.append([InlineKeyboardButton("🏠 Menu Principal", callback_data="back_to_menu")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    text = f"📦 *Meu Estoque > {grp_name}*\n\nSelecione um dispositivo para ver detalhes ou usar:"
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
+async def show_stock_item_details(update: Update, context: ContextTypes.DEFAULT_TYPE, item_id: str):
+    """Exibe os detalhes de um item específico e opções 'Usar peça' ou 'Voltar'."""
+    from database.queries import get_user_inventory
+    user = update.effective_user
+    user_id = str(user.id)
+    inventory = get_user_inventory(user_id)
+    item = next((i for i in inventory if str(i['id']) == item_id), None)
+
+    if not item:
+        text = "⚠️ Peça não encontrada no estoque (pode ter sido já utilizada)."
+        keyboard = [[InlineKeyboardButton("⬅️ Voltar ao Estoque", callback_data="menu_view_stock")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+        return
+
+    cat = (item.get('category') or '').lower()
+    specs = item.get('specs') or {}
+    qty = item.get('quantity', 1)
+    grp_name = get_product_group_name(item)
+
+    group_names = context.user_data.get('stock_group_names', [])
+    grp_idx = group_names.index(grp_name) if grp_name in group_names else None
+    back_callback = f"stk_g_{grp_idx}" if grp_idx is not None else "menu_view_stock"
+
+    text = "📦 *Detalhes do Equipamento*\n\n"
+    if cat == "leitor":
+        text += f"🔹 *Categoria:* Leitor Facial\n"
+        text += f"🔹 *Modelo:* `{specs.get('modelo', 'N/A')}`\n"
+        text += f"🔹 *Número de Série:* `{specs.get('numero_serie', 'N/A')}`\n"
+        if specs.get('mac_address'):
+            text += f"🔹 *MAC Address:* `{specs['mac_address']}`\n"
+    elif cat == "catraca":
+        text += f"🔹 *Categoria:* Catraca Facial\n"
+        text += f"🔹 *Versão da Placa/Modelo:* `{specs.get('versao_placa', 'N/A')}`\n"
+        text += f"🔹 *Número de Série:* `{specs.get('numero_serie', 'N/A')}`\n"
+        if specs.get('mac_address'):
+            text += f"🔹 *MAC Address:* `{specs['mac_address']}`\n"
+    elif cat == "fonte":
+        text += f"🔹 *Categoria:* Fonte de Alimentação\n"
+        text += f"🔹 *Marca:* `{specs.get('marca', 'N/A')}`\n"
+        text += f"🔹 *Voltagem / Corrente:* `{specs.get('voltagem', '')} {specs.get('corrente', '')}`\n"
+        text += f"🔹 *Quantidade disponível:* {qty} unid.\n"
+    elif cat == "antena":
+        text += f"🔹 *Categoria:* Placa de Antenas\n"
+        text += f"🔹 *Tipo:* `{specs.get('tipo', 'N/A')}`\n"
+        text += f"🔹 *Modelo:* `{specs.get('modelo', 'N/A')}`\n"
+        text += f"🔹 *Quantidade disponível:* {qty} unid.\n"
+    else:
+        text += f"🔹 *Categoria:* {cat.capitalize()}\n"
+        text += f"🔹 *Quantidade:* {qty} unid.\n"
+
+    text += "\nO que deseja fazer com esta peça?"
+
+    keyboard = [
+        [InlineKeyboardButton("📤 Usar Peça", callback_data=f"use_item_direct_{item['id']}")],
+        [InlineKeyboardButton("⬅️ Voltar", callback_data=back_callback)],
+        [InlineKeyboardButton("🏠 Menu Principal", callback_data="back_to_menu")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+
 async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Recebe o clique de qualquer botão inline e direciona para o fluxo certo."""
     query = update.callback_query
@@ -55,34 +234,18 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     data = query.data
     
     if data == "menu_view_stock":
-        from database.queries import get_user_inventory
-        user_id = str(query.from_user.id)
-        inventory = get_user_inventory(user_id)
-        
-        if not inventory:
-            await query.message.reply_text("📦 *Meu Estoque*\n\nSeu estoque está vazio.", parse_mode='Markdown')
-        else:
-            text = "📦 *Meu Estoque*\n\n"
-            for item in inventory:
-                cat = item['category']
-                specs = item['specs']
-                qty = item['quantity']
-                
-                if cat == "catraca":
-                    text += f"🔹 Catraca - Placa {specs.get('versao_placa', '')} (NS: {specs.get('numero_serie', '')} | MAC: {specs.get('mac_address', '')})\n"
-                elif cat == "leitor":
-                    text += f"🔹 Leitor {specs.get('modelo', '')} (NS: {specs.get('numero_serie', '')} | MAC: {specs.get('mac_address', '')})\n"
-                elif cat == "fonte":
-                    text += f"🔹 Fonte {specs.get('marca', '')} {specs.get('voltagem', '')} {specs.get('corrente', '')} ({qty} unid.)\n"
-                elif cat == "antena":
-                    text += f"🔹 Antena {specs.get('tipo', '')} - {specs.get('modelo', '')} ({qty} unid.)\n"
-                else:
-                    text += f"🔹 {cat.capitalize()} ({qty} unid.)\n"
-            
-            await query.message.reply_text(text, parse_mode='Markdown')
-        
-        # Voltar ao menu principal depois
-        await show_main_menu(update, context)
+        return await show_stock_categories(update, context)
+    elif data.startswith("stk_g_"):
+        grp_idx = int(data.replace("stk_g_", ""))
+        return await show_stock_group_items(update, context, grp_idx)
+    elif data.startswith("stk_i_"):
+        item_id = data.replace("stk_i_", "")
+        return await show_stock_item_details(update, context, item_id)
+    elif data == "back_to_menu":
+        return await show_main_menu(update, context)
+    elif data.startswith("use_item_direct_"):
+        from bot.conversation_use import start_use_item
+        return await start_use_item(update, context)
     elif data == "menu_view_trunk":
         from database.queries import get_pending_returns
         user_id = str(query.from_user.id)
