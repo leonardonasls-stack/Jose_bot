@@ -52,11 +52,18 @@ KNOWN_MODELS = {
     "DS-K1T342": "DS-K1T342"
 }
 
-def preprocess_image(image: Image.Image) -> Image.Image:
-    """Aplica escala de cinza e realce de contraste para melhor leitura de etiquetas."""
+def preprocess_image(image: Image.Image, scale: float = 1.5, contrast: float = 2.0) -> Image.Image:
+    """Aplica redimensionamento, autocontraste e escala de cinza para melhor leitura de etiquetas."""
+    if scale > 1.0 and (image.width < 2500 and image.height < 2500):
+        new_w = int(image.width * scale)
+        new_h = int(image.height * scale)
+        resample = getattr(Image, 'Resampling', Image).LANCZOS
+        image = image.resize((new_w, new_h), resample)
+
     gray = image.convert('L')
-    enhancer = ImageEnhance.Contrast(gray)
-    enhanced = enhancer.enhance(2.0)
+    auto = ImageOps.autocontrast(gray, cutoff=2)
+    enhancer = ImageEnhance.Contrast(auto)
+    enhanced = enhancer.enhance(contrast)
     return enhanced
 
 def extract_text_from_bytes(image_bytes: bytes) -> str:
@@ -87,7 +94,7 @@ def extract_text_from_bytes(image_bytes: bytes) -> str:
 
         # 2. Passada com pré-processamento de contraste e PSM 6 (bloco de texto uniforme)
         try:
-            processed = preprocess_image(image)
+            processed = preprocess_image(image, scale=1.5, contrast=2.0)
             t2 = pytesseract.image_to_string(processed, lang='por+eng', config='--psm 6').strip()
             if t2 and t2 not in extracted_texts:
                 extracted_texts.append(t2)
@@ -96,12 +103,21 @@ def extract_text_from_bytes(image_bytes: bytes) -> str:
 
         # 3. Passada com PSM 11 (texto esparso - excelente para números de série ou códigos isolados)
         try:
-            processed = preprocess_image(image)
+            processed = preprocess_image(image, scale=2.0, contrast=2.2)
             t3 = pytesseract.image_to_string(processed, lang='eng', config='--psm 11').strip()
             if t3 and t3 not in extracted_texts:
                 extracted_texts.append(t3)
         except Exception as e:
             logger.warning(f"Passada 3 OCR falhou: {e}")
+
+        # 4. Passada com PSM 4 (coluna única com diferentes tamanhos de fonte - etiquetas de produtos)
+        try:
+            processed = preprocess_image(image, scale=1.5, contrast=2.0)
+            t4 = pytesseract.image_to_string(processed, lang='por+eng', config='--psm 4').strip()
+            if t4 and t4 not in extracted_texts:
+                extracted_texts.append(t4)
+        except Exception as e:
+            logger.warning(f"Passada 4 OCR falhou: {e}")
 
         # Combina os textos reconhecidos para não perder nenhum dado
         combined_text = "\n".join(extracted_texts).strip()
@@ -216,88 +232,96 @@ def parse_label_info(raw_text: str) -> Dict[str, Optional[str]]:
             if cand_model.upper() not in STOP_WORDS:
                 info["modelo"] = cand_model
 
-    # 4. Identificação de Número de Série
-    # Passo A: Prefixo explícito (SN, S/N, SERIAL, Nº, N/S, etc.)
+    # 4. Identificação de Número de Série com Sistema de Pontuação de Candidatos
+    candidates = []
+
+    # Passo A: Prefixo explícito (SN, S/N, SERIAL, Nº, N/S, CÓD, etc.)
     explicit_sn_regex = re.compile(
-        r'(?:S[\/\.\\|I]?N|SERIAL(?:\s*NO|\s*NUMERO)?|N[\/\.\\|I]?S|N[º°o]\.?(?:\s*S[EÉ]RIE)?)[\s:#-]*([A-Za-z0-9\-_*|]{4,25})',
+        r'(?:S[\/\.\\|I]?N|SERIAL(?:\s*NO|\s*NUMERO)?|N[\/\.\\|I]?S|N[º°o]\.?(?:\s*S[EÉ]RIE)?|C[OÓ]D(?:\s*S[EÉ]RIE)?)[\s:#-]*([^\n\r]+)',
         re.IGNORECASE
     )
     for match in explicit_sn_regex.finditer(raw_text):
-        cand = clean_token(match.group(1))
-        if not is_blacklisted(cand, mac_cleaned):
-            if any(c.isdigit() for c in cand):
-                info["numero_serie"] = cand
+        rest = match.group(1).strip()
+        parts = rest.split()
+        sn_parts = []
+        for p in parts:
+            p_clean = clean_token(p)
+            if not p_clean:
+                continue
+            if is_blacklisted(p_clean, mac_cleaned):
                 break
+            if any(c.isdigit() for c in p_clean):
+                sn_parts.append(p_clean)
+            else:
+                break
+        if sn_parts:
+            if all(part.isdigit() for part in sn_parts):
+                cand = "".join(sn_parts)
+            else:
+                cand = "-".join(sn_parts) if len(sn_parts) > 1 else sn_parts[0]
+            cand = clean_token(cand)
+            if not is_blacklisted(cand, mac_cleaned) and len(cand) >= 4:
+                candidates.append((120 + len(cand), cand))
 
     lines = [clean_token(l) for l in raw_text.splitlines() if clean_token(l)]
 
     # Passo B: Heurística Control iD / Abaixo da Marca ou Modelo
-    # Em produtos Control iD, o adesivo contém a marca/modelo e o número de série logo abaixo
-    if not info["numero_serie"]:
-        anchor_indices = []
-        for idx, line in enumerate(lines):
-            l_up = line.upper()
-            if any(k in l_up for k in ["CONTROL", "IDFACE", "IDBLOCK", "IDBOX", "IDFLEX", "IDCLASS", "IDLOCK", "MODELO", "MODEL"]):
-                anchor_indices.append(idx)
-            elif info["modelo"] and info["modelo"].upper() in l_up:
-                anchor_indices.append(idx)
+    anchor_indices = []
+    for idx, line in enumerate(lines):
+        l_up = line.upper()
+        if any(k in l_up for k in ["CONTROL", "IDFACE", "IDBLOCK", "IDBOX", "IDFLEX", "IDCLASS", "IDLOCK", "MODELO", "MODEL"]):
+            anchor_indices.append(idx)
+        elif info["modelo"] and info["modelo"].upper() in l_up:
+            anchor_indices.append(idx)
 
-        # Procura nas linhas imediatamente seguintes (1, 2, 3 linhas abaixo)
-        for anchor_idx in anchor_indices:
-            for offset in [1, 2, 3]:
-                cand_idx = anchor_idx + offset
-                if cand_idx < len(lines):
-                    cand_line = lines[cand_idx]
-                    tokens = cand_line.split()
-                    for tok in tokens:
-                        tok_clean = clean_token(tok)
-                        if not is_blacklisted(tok_clean, mac_cleaned):
-                            # Números de série Control iD tipicamente são puramente numéricos (6 a 12 dígitos, ex: 00012345)
-                            if tok_clean.isdigit() and 5 <= len(tok_clean) <= 12:
-                                info["numero_serie"] = tok_clean
-                                break
-                            # Ou alfanuméricos com pelo menos 3 dígitos
-                            elif re.match(r'^[A-Za-z0-9\-_]{5,16}$', tok_clean):
-                                if sum(1 for c in tok_clean if c.isdigit()) >= 3:
-                                    info["numero_serie"] = tok_clean
-                                    break
-                    if info["numero_serie"]:
-                        break
-            if info["numero_serie"]:
-                break
+    for anchor_idx in anchor_indices:
+        for offset in [1, 2, 3]:
+            cand_idx = anchor_idx + offset
+            if cand_idx < len(lines):
+                cand_line = lines[cand_idx]
+                # Une dígitos isolados separados por espaço (ex: "0001 2345" -> "00012345")
+                line_compact = re.sub(r'(\d)\s+(\d)', r'\1\2', cand_line)
+                tokens = [clean_token(t) for t in line_compact.split()]
+                
+                for tok in tokens:
+                    if not tok or is_blacklisted(tok, mac_cleaned):
+                        continue
+                    if tok.isdigit():
+                        if 6 <= len(tok) <= 12:
+                            candidates.append((90 + len(tok), tok))
+                        elif 4 <= len(tok) < 6:
+                            candidates.append((40 + len(tok), tok))
+                    elif re.match(r'^[A-Za-z0-9\-_]{5,16}$', tok) and sum(1 for c in tok if c.isdigit()) >= 3:
+                        candidates.append((70 + len(tok), tok))
 
-    # Passo C: Procurar números entre marcadores de código de barras (ex: *00012345*)
-    if not info["numero_serie"]:
-        barcode_regex = re.compile(r'[*|]\s*([A-Za-z0-9\-_]{5,16})\s*[*|]')
-        for b_match in barcode_regex.finditer(raw_text):
-            cand = clean_token(b_match.group(1))
-            if not is_blacklisted(cand, mac_cleaned) and any(c.isdigit() for c in cand):
-                info["numero_serie"] = cand
-                break
+    # Passo C: Código de barras (ex: *00012345* ou * 0001 2345 *)
+    barcode_regex = re.compile(r'[*|]\s*([A-Za-z0-9\s\-_]{4,20})\s*[*|]')
+    for b_match in barcode_regex.finditer(raw_text):
+        raw_b = b_match.group(1)
+        b_compact = re.sub(r'(\d)\s+(\d)', r'\1\2', raw_b).replace(" ", "")
+        cand = clean_token(b_compact)
+        if not is_blacklisted(cand, mac_cleaned) and any(c.isdigit() for c in cand):
+            if len(cand) >= 5:
+                candidates.append((85 + len(cand), cand))
 
-    # Passo D: Fallback Geral - Procurar por sequências numéricas de 6 a 10 dígitos (típico de Control iD)
-    if not info["numero_serie"]:
-        for line in lines:
-            for tok in line.split():
-                tok_clean = clean_token(tok)
-                if not is_blacklisted(tok_clean, mac_cleaned):
-                    if tok_clean.isdigit() and 6 <= len(tok_clean) <= 10:
-                        info["numero_serie"] = tok_clean
-                        break
-            if info["numero_serie"]:
-                break
+    # Passo D: Fallback Geral - Procurar por sequências numéricas e alfanuméricas
+    for line in lines:
+        line_compact = re.sub(r'(\d)\s+(\d)', r'\1\2', line)
+        for tok in line_compact.split():
+            tok_clean = clean_token(tok)
+            if not tok_clean or is_blacklisted(tok_clean, mac_cleaned):
+                continue
+            if tok_clean.isdigit():
+                if 7 <= len(tok_clean) <= 12:
+                    candidates.append((60 + len(tok_clean), tok_clean))
+                elif 5 <= len(tok_clean) < 7:
+                    candidates.append((30 + len(tok_clean), tok_clean))
+            elif re.match(r'^[A-Za-z0-9\-_]{5,16}$', tok_clean) and sum(1 for c in tok_clean if c.isdigit()) >= 3:
+                candidates.append((30 + len(tok_clean), tok_clean))
 
-    # Passo E: Fallback Alfanumérico geral
-    if not info["numero_serie"]:
-        for line in lines:
-            for tok in line.split():
-                tok_clean = clean_token(tok)
-                if not is_blacklisted(tok_clean, mac_cleaned):
-                    if re.match(r'^[A-Za-z0-9\-_]{5,16}$', tok_clean):
-                        if sum(1 for c in tok_clean if c.isdigit()) >= 2:
-                            info["numero_serie"] = tok_clean
-                            break
-            if info["numero_serie"]:
-                break
+    if candidates:
+        # Ordena pelo maior score e seleciona o melhor candidato
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        info["numero_serie"] = candidates[0][1]
 
     return info
