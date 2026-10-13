@@ -286,6 +286,12 @@ async def button_click_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         elif data == "menu_rma":
             from bot.conversation_rma import start_rma
             return await start_rma(update, context)
+    elif data in ["catraca", "leitor", "fonte", "antena"]:
+        from bot.conversations import handle_category_choice
+        return await handle_category_choice(update, context)
+    elif data == "cancel":
+        await query.message.reply_text("Operação cancelada.")
+        await show_main_menu(update, context)
     else:
         logger.warning(f"Callback data não reconhecido recebido: {data}")
         await query.message.reply_text("Opção não reconhecida. Use /menu para voltar ao menu principal.")

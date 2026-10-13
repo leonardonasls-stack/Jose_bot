@@ -607,16 +607,23 @@ async def cancel_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop('add_category', None)
     context.user_data.pop('add_specs', None)
     context.user_data.pop('add_quantity', None)
-    await update.message.reply_text("Operação cancelada.")
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text("Operação cancelada.")
+    elif update.message:
+        await update.message.reply_text("Operação cancelada.")
     await show_main_menu(update, context)
     return ConversationHandler.END
 
 # Constrói o ConversationHandler para ser usado no main.py
 def get_add_item_conversation():
     return ConversationHandler(
-        entry_points=[CallbackQueryHandler(start_add_item, pattern="^menu_add_item$")],
+        entry_points=[
+            CallbackQueryHandler(start_add_item, pattern="^menu_add_item$"),
+            CallbackQueryHandler(handle_category_choice, pattern="^(catraca|leitor|fonte|antena)$")
+        ],
         states={
-            CHOOSE_CATEGORY: [CallbackQueryHandler(handle_category_choice)],
+            CHOOSE_CATEGORY: [CallbackQueryHandler(handle_category_choice, pattern="^(catraca|leitor|fonte|antena|cancel)$")],
             
             CATRACA_PLACA: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, catraca_placa)],
             CATRACA_SN: [MessageHandler((filters.TEXT | filters.PHOTO) & ~filters.COMMAND, catraca_sn)],
@@ -650,6 +657,10 @@ def get_add_item_conversation():
         },
         fallbacks=[
             CommandHandler("cancel", cancel_add),
+            CommandHandler("menu", cancel_add),
+            CommandHandler("start", cancel_add),
+            CallbackQueryHandler(cancel_add, pattern="^cancel$"),
             MessageHandler(filters.ALL & ~filters.COMMAND, invalid_input)
-        ]
+        ],
+        allow_reentry=True
     )

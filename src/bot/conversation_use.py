@@ -367,7 +367,12 @@ async def finish_use_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def cancel_use(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Operação cancelada.")
+    context.user_data.pop('use_data', None)
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text("Operação cancelada.")
+    elif update.message:
+        await update.message.reply_text("Operação cancelada.")
     await show_main_menu(update, context)
     return ConversationHandler.END
 
@@ -388,6 +393,10 @@ def get_use_item_conversation():
         },
         fallbacks=[
             CommandHandler("cancel", cancel_use),
+            CommandHandler("menu", cancel_use),
+            CommandHandler("start", cancel_use),
+            CallbackQueryHandler(cancel_use, pattern="^cancel$"),
             MessageHandler(filters.ALL & ~filters.COMMAND, invalid_input)
-        ]
+        ],
+        allow_reentry=True
     )

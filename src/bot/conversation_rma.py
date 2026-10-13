@@ -97,7 +97,11 @@ async def finish_rma(update: Update, context: ContextTypes.DEFAULT_TYPE, dispatc
     return ConversationHandler.END
 
 async def cancel_rma(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Operação cancelada.")
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text("Operação cancelada.")
+    elif update.message:
+        await update.message.reply_text("Operação cancelada.")
     await show_main_menu(update, context)
     return ConversationHandler.END
 
@@ -113,6 +117,10 @@ def get_rma_conversation():
         },
         fallbacks=[
             CommandHandler("cancel", cancel_rma),
+            CommandHandler("menu", cancel_rma),
+            CommandHandler("start", cancel_rma),
+            CallbackQueryHandler(cancel_rma, pattern="^(cancel|rma_confirm_no)$"),
             MessageHandler(filters.ALL & ~filters.COMMAND, invalid_input)
-        ]
+        ],
+        allow_reentry=True
     )
